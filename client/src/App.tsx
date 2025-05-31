@@ -26,13 +26,15 @@ import { useTranslation } from 'react-i18next'
 
 function App() {
   const ref = useRef(false)
-  const externalHTMLLoaded = useRef(false) // 新增：用于控制外部资源加载状态
+  const externalHTMLLoaded = useRef(false)
   const { t } = useTranslation()
   const [profile, setProfile] = useState<Profile | undefined>()
-  const [config, setConfig] = useState<ConfigWrapper>(new ConfigWrapper({}, new Map())
-                                                      
+  const [config, setConfig] = useState<ConfigWrapper>(new ConfigWrapper({}, new Map()))
+  
   useEffect(() => {
     if (ref.current) return
+    
+    // 加载用户配置
     if (getCookie('token')?.length ?? 0 > 0) {
       client.user.profile.get({
         headers: headersWithAuth()
@@ -47,6 +49,8 @@ function App() {
         }
       })
     }
+    
+    // 加载客户端配置
     const config = sessionStorage.getItem('config')
     if (config) {
       const configObj = JSON.parse(config)
@@ -61,12 +65,98 @@ function App() {
         }
       })
     }
-
-
-
     
-    ref.current = true
-  }, [])
+    // 加载音乐播放器和Live2D
+    const loadExternalResources = () => {
+      const ua = navigator.userAgent;
+      const hasFetchAction = /FetchAction/.test(ua);
+      if (!hasFetchAction && !externalHTMLLoaded.current) {
+        externalHTMLLoaded.current = true;
+
+        // 1. 先加载APlayer
+        const aplayerScript = document.createElement('script');
+        aplayerScript.src = "https://npm.elemecdn.com/aplayer@1.10.1/dist/APlayer.min.js";
+        aplayerScript.async = true;
+        
+        // 2. APlayer加载成功后再加载MetingJS
+        aplayerScript.onload = () => {
+          const metingScript = document.createElement('script');
+          metingScript.src = "https://npm.elemecdn.com/meting@2.0.1/dist/Meting.min.js";
+          metingScript.async = true;
+          
+          metingScript.onload = () => {
+            // 配置Meting API
+            const metingConfigScript = document.createElement('script');
+            metingConfigScript.textContent = `var meting_api='https://api.obdo.cc/meting/?server=:server&type=:type&id=:id';`;
+            document.body.appendChild(metingConfigScript);
+            
+            // 创建播放器容器
+            setTimeout(() => {
+              const playerContainer = document.createElement('div');
+              playerContainer.id = 'aplayer-container';
+              playerContainer.innerHTML = `
+                <div style="
+                  position: fixed;
+                  right: 20px;
+                  bottom: 20px;
+                  z-index: 9999;
+                  width: 300px;
+                  max-width: 100%;
+                ">
+                  <meting-js 
+                    id="my-aplayer"
+                    autoplay="false"
+                    order="random"
+                    theme="#409EFF"
+                    list-folded="true"
+                    fixed="true"
+                    mini="false"
+                    loop="all"
+                    volume="0.7"
+                    mutex="true"
+                    preload="auto"
+                    auto="https://music.163.com/#/playlist?id=8900628861"
+                  />
+                </div>
+              `;
+              document.body.appendChild(playerContainer);
+            }, 500);
+          };
+          
+          document.body.appendChild(metingScript);
+        };
+        
+        aplayerScript.onerror = (e) => {
+          console.error('APlayer加载失败:', e);
+        };
+        
+        document.body.appendChild(aplayerScript);
+
+        // 加载Live2D
+        const live2dScript = document.createElement('script');
+        live2dScript.src = "https://assets.xn--9iq088f7qityd.com/js/live2d.js";
+        live2dScript.async = true;
+        document.body.appendChild(live2dScript);
+      }
+    };
+
+    // 确保React完成初始渲染后再加载外部资源
+    const timer = setTimeout(() => {
+      loadExternalResources();
+    }, 1000);
+
+    ref.current = true;
+    
+    return () => {
+      clearTimeout(timer);
+      // 清理可能存在的播放器
+      const player = document.getElementById('aplayer-container');
+      if (player) {
+        document.body.removeChild(player);
+      }
+    };
+  }, []);
+
   const favicon = `${process.env.API_URL}/favicon`;
   return (
     <>
@@ -84,7 +174,6 @@ function App() {
             <RouteMe path="/timeline">
               <TimelinePage />
             </RouteMe>
-
 
             <RouteMe path="/friends">
               <FriendsPage />
@@ -109,7 +198,6 @@ function App() {
             <RouteMe path="/settings" paddingClassName='mx-4'>
               <Settings />
             </RouteMe>
-
 
             <RouteMe path="/writing" paddingClassName='mx-4'>
               <WritingPage />
@@ -193,7 +281,6 @@ function RouteMe({ path, children, headerComponent, paddingClassName }:
     </Route>
   )
 }
-
 
 function RouteWithIndex({ path, children }:
   { path: PathPattern, children: (params: DefaultParams, TOC: () => JSX.Element, clean: (id: string) => void) => React.ReactNode }) {
